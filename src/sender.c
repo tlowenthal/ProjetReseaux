@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
     bool fec_enabled = false;
     uint16_t receiver_port;
 
-    while ((opt = getopt(argc, argv, "f:s:hc")) != -1) {
+    while ((opt = getopt(argc, argv, "f:s:h:c")) != -1) {
         switch (opt) {
         case 'f':
             filename = optarg;
@@ -32,9 +32,9 @@ int main(int argc, char **argv) {
         case 's':
             stats_filename = optarg;
             break;
-	case 'c':
-	    fec_enabled = true;
-	    break;
+	    case 'c':
+	        fec_enabled = true;
+	        break;
         default:
             return print_usage(argv[0]);
         }
