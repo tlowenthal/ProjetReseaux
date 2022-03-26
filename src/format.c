@@ -1,13 +1,4 @@
-#include "log.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <unistd.h>
-#include <stdint.h>
-#include <time.h>
-#include <string.h>
-#include <zlib.h>
-#define MAXLEN 640
+#include "format.h"
 
 void printBits(uint8_t a){
     for (int i = 0; i < 8; i++) {
@@ -17,6 +8,7 @@ void printBits(uint8_t a){
 }
 
 //buf doit etre initie a 0 et avoir une longueur de MAXLEN
+//msg is freed a the end, so it must have been allocated for a DATA type
 int format(uint8_t *buf, uint8_t window, uint8_t *msg, uint16_t msg_len, uint8_t seq_num){
 
     uint8_t *ptr = buf;
@@ -39,21 +31,35 @@ int format(uint8_t *buf, uint8_t window, uint8_t *msg, uint16_t msg_len, uint8_t
     //Ici on met le timestamp
 
     ptr+=4;
-    memcpy(ptr, (uint8_t *) crc32(0, buf, 4), 4);
+    uint8_t *copy = malloc(8);
+    if (copy == NULL) return -1;
+    memcpy(copy, buf, 8);
+    *copy = *copy & ~(1 << 5);//on met TR a 0
+    uint32_t crc = htonl((uint32_t) crc32(0, copy, 8));
+    memcpy(ptr, &crc, 4);
+
+    //copie du msg
+    ptr+=4;
+    //Si Data avec TR=0
+    if ((*buf & 1 << 6) && !(*buf & 1 << 5)){
+        memcpy(ptr, msg, msg_len);
+        free(msg);
+        crc = htonl((uint32_t) crc32(0, ptr, msg_len));//pour le CRC2
+        ptr+=msg_len;
+        memcpy(ptr, &crc, 4);
+    } else if(!(*buf & 1 << 7) && !(*buf & 1 << 6)){//type FEC
+        if (!(*buf & 1 << 5)){// Si TR=0
+            crc = htonl((uint32_t) crc32(0, ptr, 512));//pour le CRC2
+            ptr+=512;
+            memcpy(ptr, &crc, 4);
+        } else {
+            ptr+=512;
+        }
+    }
+
+
+
 
 
     return 0;
-}
-
-
-int main(int argc, char **argv) {
-
-    uint8_t *buf = malloc(MAXLEN);
-    uint8_t window = 1;
-    char *msg = "Bonjour, je m'appelle Tobias";
-    uint8_t seq_num = 2;
-
-    format(buf, window, (uint8_t *) msg, (uint16_t) 29, seq_num);
-
-    //printBits(*buf);
 }
