@@ -7,6 +7,8 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <poll.h>
 
 #include "log.h"
 #include "format.h"
@@ -80,6 +82,13 @@ int main(int argc, char **argv) {
         return -1;
     }
 
+    int err = connect(sock, (const struct sockaddr *) &addr, sizeof(addr));
+    if (err < 0)
+    {
+        ERROR("\n Connecting error \n");
+        return -1;
+    }
+
     //ouverture du fichier
     int fd = open(filename, O_RDONLY);
     if (fd < 0)
@@ -88,17 +97,118 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    /*
-    //allocation memoire pour le msg a envoyer
-    uint8_t *msg = malloc(512);
-    if (msg == NULL){
-        ERROR("\n msg malloc failed \n");
+    struct stat buf;
+    err = fstat(fd, &buf);
+    if (err < 0)
+    {
+        ERROR("\n Fstat error \n");
         return -1;
     }
-    */
+    off_t size = buf.st_size;
+    int n_msg = size/512 + 1;
+    ERROR("nombre de messages à envoyer : %d", n_msg);
 
     //mapping du contenu de filename dans msg
-    uint8_t *mapping = (uint8_t *) mmap(NULL, 512, PROT_READ, MAP_SHARED, fd, 0);
+    uint8_t *mapping = (uint8_t *) mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+    if (mapping == MAP_FAILED){
+        ERROR("\n Mapping error \n");
+        return -1;
+    }
+
+    uint8_t *ptr = mapping;
+    uint8_t mywindow = 32;
+    uint8_t hiswindow = 1;
+    uint8_t seqnum = 1;
+    uint8_t expected_seq = 1;
+    off_t current_size = size;
+    int i = 0;
+    while (i < n_msg){
+
+        while (current_size > 0 && seqnum <= expected_seq + hiswindow){
+
+            uint8_t *buf = malloc(640);
+            if (buf == NULL){
+                ERROR("\n buf malloc error \n");
+                err = munmap(mapping, size);
+                if (err < 0){
+                    ERROR("\n munmap error \n");
+                    return -1;
+                }
+                return -1;
+            }
+
+            uint16_t len = (current_size > 512) ? 512 : current_size;
+            err = format(buf, mywindow, ptr, len, seqnum);
+            if (err < 0){
+                ERROR("\n Formatting error \n");
+                err = munmap(mapping, size);
+                if (err < 0){
+                    ERROR("\n munmap error \n");
+                    return -1;
+                }
+                return -1;
+            }
+
+            err = send(sock, buf, len, 0);
+            if (err < 0){
+                ERROR("\n Sending error \n");
+                err = munmap(mapping, size);
+                if (err < 0){
+                    ERROR("\n munmap error \n");
+                    return -1;
+                }
+                return -1;
+            }
+
+            free(buf);
+            current_size-=len;
+            ptr+=len;
+            seqnum++;
+        }
+
+        struct pollfd pfds[1];
+        pfds[0].fd = sock; // 0 represents stdin
+        pfds[0].events = POLLIN; // check ready to read
+        err = poll(pfds, 1, -1);
+        if (err < 0){
+            ERROR("\n Polling error \n");
+            err = munmap(mapping, size);
+            if (err < 0){
+                ERROR("\n munmap error \n");
+                return -1;
+            }
+            return -1;
+        }
+        if(pfds[0].revents & POLLIN) {
+            uint8_t *rec_buf = malloc(640);
+            if (rec_buf == NULL){
+                ERROR("\n buf malloc error \n");
+                err = munmap(mapping, size);
+                if (err < 0){
+                    ERROR("\n munmap error \n");
+                    return -1;
+                }
+                return -1;
+            }
+            err = recv(sock, rec_buf, 640, 0);
+            if (err < 0){
+                ERROR("\n Reception error \n");
+                err = munmap(mapping, size);
+                if (err < 0){
+                    ERROR("\n munmap error \n");
+                    return -1;
+                }
+                return -1;
+            }
+            if (*rec_buf & 1 << 5) continue;
+            *rec_buf = *rec_buf & ~(1 << 6);
+            *rec_buf = *rec_buf & ~(1 << 7);
+            hiswindow = *rec_buf;
+            expected_seq = *(rec_buf + 1);
+            i++;
+        }
+
+    }
 
 
     // This is not an error per-se.

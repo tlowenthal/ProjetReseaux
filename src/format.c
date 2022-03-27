@@ -8,7 +8,6 @@ void printBits(uint8_t a){
 }
 
 //buf doit etre initie a 0 et avoir une longueur de MAXLEN
-//msg is freed a the end, so it must have been allocated for a DATA type
 int format(uint8_t *buf, uint8_t window, uint8_t *msg, uint16_t msg_len, uint8_t seq_num){
 
     uint8_t *ptr = buf;
@@ -43,7 +42,6 @@ int format(uint8_t *buf, uint8_t window, uint8_t *msg, uint16_t msg_len, uint8_t
     //Si Data avec TR=0
     if ((*buf & 1 << 6) && !(*buf & 1 << 5)){
         memcpy(ptr, msg, msg_len);
-        free(msg);
         crc = htonl((uint32_t) crc32(0, ptr, msg_len));//pour le CRC2
         ptr+=msg_len;
         memcpy(ptr, &crc, 4);
